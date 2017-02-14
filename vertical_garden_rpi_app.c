@@ -4,6 +4,7 @@
 #include <pthread.h>
 #include <stdarg.h>
 #include "bcm2835.h"
+#include "vertical_garden_rpi_app.h"
 
 /******************************************
  * 				Defines
