@@ -3,7 +3,7 @@
 #include <time.h>
 #include <pthread.h>
 #include <stdarg.h>
-#include "vertical_garden_rpi_app.h"
+#include "bcm2835.h"
 
 /******************************************
  * 				Defines
@@ -34,6 +34,8 @@ struct periodic_task {
 struct periodic_task *periodic_tasks[PERIODIC_TASKS_NO];
 
 pthread_mutex_t logfile_mutex;
+
+const unsigned int task_gpios[6] = {4, 0, 0, 0, 0, 0};
 
 /******************************************
  * 		   Function Prototypes
@@ -259,6 +261,23 @@ static void *run_periodic_task(void *arg)
 							// gpio ON
 							// sleep 'duration' sec
 							// gpio OFF
+							bcm2835_gpio_fsel(4, BCM2835_GPIO_FSEL_OUTP);	
+							bcm2835_gpio_fsel(18, BCM2835_GPIO_FSEL_OUTP);	
+
+							printf("gpio 4 set\n");
+							bcm2835_gpio_set(4);
+
+							printf("gpio 18 set\n");
+							bcm2835_gpio_set(18);
+
+							sleep(task.duration);
+
+							printf("gpio 4 clr\n");
+							bcm2835_gpio_clr(4);
+
+							printf("gpio 18 clr\n");
+							bcm2835_gpio_clr(18);
+
 							sleep_sec = task.freq * 60 - task.duration;
 							goto put_thread_to_sleep;
 
@@ -310,6 +329,23 @@ static void *run_periodic_task(void *arg)
 						if( current_sec == (i * (task.freq * 60) + start_sec) ) {
 							// execute task
 							//printf("dbg#11\n");
+							bcm2835_gpio_fsel(4, BCM2835_GPIO_FSEL_OUTP);	
+							bcm2835_gpio_fsel(18, BCM2835_GPIO_FSEL_OUTP);	
+
+							printf("gpio 4 set\n");
+							bcm2835_gpio_set(4);
+
+							printf("gpio 18 set\n");
+							bcm2835_gpio_set(18);
+
+							sleep(task.duration);
+
+							printf("gpio 4 clr\n");
+							bcm2835_gpio_clr(4);
+
+							printf("gpio 18 clr\n");
+							bcm2835_gpio_clr(18);
+
 							sleep_sec = task.freq * 60 - task.duration;
 							goto put_thread_to_sleep;
 						} else {
@@ -331,6 +367,23 @@ static void *run_periodic_task(void *arg)
 						if( current_sec == (i * (task.freq * 60) + (start_sec - 86400)) ) {
 							// execute task
 							//printf("dbg#15\n");
+							bcm2835_gpio_fsel(4, BCM2835_GPIO_FSEL_OUTP);	
+							bcm2835_gpio_fsel(18, BCM2835_GPIO_FSEL_OUTP);	
+
+							printf("gpio 4 set\n");
+							bcm2835_gpio_set(4);
+
+							printf("gpio 18 set\n");
+							bcm2835_gpio_set(18);
+
+							sleep(task.duration);
+
+							printf("gpio 4 clr\n");
+							bcm2835_gpio_clr(4);
+
+							printf("gpio 18 clr\n");
+							bcm2835_gpio_clr(18);
+
 							sleep_sec = task.freq * 60 - task.duration;
 							goto put_thread_to_sleep;
 						} else {
@@ -376,6 +429,8 @@ int main() {
 
 	print_safe(0, &logfile_mutex, "Application started\n", 0);
 
+	printf("bcm2835_init result: %d\n", bcm2835_init());
+
 	// update periodic tasks parameters from database
 	update_periodic_tasks_from_database();
 
@@ -403,3 +458,4 @@ int main() {
 	}
  return 0;
 }
+
