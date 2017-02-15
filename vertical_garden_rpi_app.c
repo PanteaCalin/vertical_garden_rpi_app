@@ -38,6 +38,13 @@ pthread_mutex_t logfile_mutex;
 
 const unsigned int task_gpios[6] = {4, 0, 0, 0, 0, 0};
 
+
+const struct time_segment {
+	time_t        segment_start;
+	time_t        segment_end;
+	unsigned char active;
+};
+
 /******************************************
  * 		   Function Prototypes
  *******************************************/
@@ -116,6 +123,12 @@ static void update_periodic_tasks_from_database(void)
 
 /******************************************
  * print_safe()
+ * params: - unsigned int task_id: id of the taks calling this function;
+ * 								 primarily used for identifiying the thread in case of failure
+ * 		   - pthread_mutex_t* mutex: pointer to the mutex used to protect the logfile
+ * 		   - char* msg: pointer to the string to be written to logfile
+ * 		   - int argn: number of arguments given in the elipses ('...') argument
+ * 		   - ... : variable number of arguments (the number of arguments passed should match 'argn' parameter)
  *******************************************/
 static void print_safe(unsigned int task_id, pthread_mutex_t* mutex, char* msg, int argn, ...)
 {
@@ -155,6 +168,14 @@ static void print_safe(unsigned int task_id, pthread_mutex_t* mutex, char* msg, 
 }
 
 /******************************************
+ * execute_task()
+ *******************************************/
+static void execute_task(const struct periodic_task* task)
+{
+
+}
+
+/******************************************
  * run_periodic_task()
  *******************************************/
 static void *run_periodic_task(void *arg)
@@ -171,12 +192,22 @@ static void *run_periodic_task(void *arg)
 	time_t end_sec;
 	time_t current_sec;
 
+	time_t interval_start;
+	time_t interval_end;
+
 	time_t sleep_sec = 0;
 
 	struct tm *time_broken_down;
 
+	struct time_segment time_segments[3];
+
+	unsigned int intervals;
+	unsigned int i, s;
+
 	// run thread in infinite loop
 	while(1) {
+
+		// get current time in seconds since epoch (01.01.1970, 00:00:00)
 		current_time_sec = time(NULL);
 		printf("current_time_sec: %d\n", current_time_sec);
 		// get current time broken down
@@ -208,212 +239,113 @@ static void *run_periodic_task(void *arg)
 		start_sec   = task_start_time_sec;
 		end_sec     = task_end_time_sec;
 
-		unsigned int intervals;
-		unsigned int i;
-
 		printf("current_sec: %d\n", current_sec);
 		printf("start_sec:   %d\n", start_sec);
 		printf("end_sec:     %d\n", end_sec);
 
-		// Legend:
-		// xxx : active period
-		// --- : inactive period
+		// Algorithm rationale:
+		//                         00:00:00                   23:59:59
+		// ||-------- DAY n-1 --------||---------- DAY n --------||-------- DAY n+1 --------|| }
+		// ||			              ||                         ||                         || }
+		// ||    start      end       ||    start      end       ||     start     end       || } case 1: start < end
+	    // ||______|_________|________||______|_________|________||______|_________|________|| }
+		// || 	   ^^^^^^^^^^^        ||      ^^^^^^^^^^^        ||      ^^^^^^^^^^^        || }
+        // ||      | active  |        ||      | active  |        ||      | active  |        || }
+        // ||      |         |        ||      |         |        ||      |         |        ||
+		// ||	   |         |        ||      |         |        ||      |         |        || }
+		// ||     end      start      ||     end      start      ||     end      start      || }
+	    // ||______|_________|________||______|_________|________||______|_________|________|| } case 2: start > end
+		// ^^^^^^^^^         ^^^^^^^^^^^^^^^^^^         ^^^^^^^^^^^^^^^^^^         ^^^^^^^^^^^ }
+        //   active          |      active    |         |      active    |             active  }
+        //                   |                |         |                |                     }
+		//                   ^^^^^^^^^^^^^^^^^^         |                |
+		//                       SEGMENT_0    ^^^^^^^^^^^                |
+		//                                    SEGMENT_1  ^^^^^^^^^^^^^^^^^
+        //                                                 SEGMENT_2
 
-		// 00:00      start   end        23:59
-		//   |----------|xxxxxx|-----------|
-		if(start_sec < end_sec) {
-			//printf("dbg#0\n");
-			// 00:00      start   end        23:59
-			//   |----------|xxxxxx|-----------|
-			//		  ^
-			//     current
-			if(current_sec < start_sec) {
-				// put thread to sleep until the start of active period
-				//printf("dbg#1\n");
-				sleep_sec = start_sec - current_sec;
-				goto put_thread_to_sleep;
-			}
-
-			// 00:00      start   end        23:59
-			//   |----------|xxxxxx|-----------|
-			//		            ^
-			//               current
-			if((current_sec >= start_sec) &&
-			   (current_sec <= end_sec)) {
-				// current time is inside the active period
-				// calculate the intervals at which the thread should wake-up while in active period
-				//printf("dbg#2\n");
-				intervals = (end_sec - start_sec) / (task.freq * 60);
-
-				// determine where the current time is with respect to task wake-up intervals
-				for(i=0; i<intervals; i++) {
-					//printf("dbg#3\n");
-					if( current_sec >= (start_sec + (i * (task.freq * 60)) ) &&
-						current_sec < (start_sec + (i + 1) * (task.freq * 60)) ) {
-						//printf("dbg#4\n");
-						if (current_sec == (start_sec + (i * (task.freq * 60))) ) {
-							//printf("dbg#5\n");
-							// 00:00  start  i  i+1 i+2..i+n end     23:59
-							//   |-----|xxxxx|xxx|xxx|xxx|xxx|--------|
-							//               ^
-							//            current
-							// execute task
-							// assert(task.duration < (task.freq * 60))
-							// gpio ON
-							// sleep 'duration' sec
-							// gpio OFF
-							bcm2835_gpio_fsel(4, BCM2835_GPIO_FSEL_OUTP);	
-							bcm2835_gpio_fsel(18, BCM2835_GPIO_FSEL_OUTP);	
-
-							printf("gpio 4 set\n");
-							bcm2835_gpio_set(4);
-
-							printf("gpio 18 set\n");
-							bcm2835_gpio_set(18);
-
-							sleep(task.duration);
-
-							printf("gpio 4 clr\n");
-							bcm2835_gpio_clr(4);
-
-							printf("gpio 18 clr\n");
-							bcm2835_gpio_clr(18);
-
-							sleep_sec = task.freq * 60 - task.duration;
-							goto put_thread_to_sleep;
-
-						} else {
-							// 00:00  start  i  i+1 i+2..i+n end     23:59
-							//   |-----|xxxxx|xxx|xxx|xxx|xxx|--------|
-							//                 ^
-							//              current
-							//printf("dbg#6\n");
-							// sleep until next interval
-							sleep_sec = (start_sec + (i + 1) * (task.freq * 60)) - current_sec;
-							goto put_thread_to_sleep;
-						}
-					} else {
-						// set the next wake-up to next start but don't jump to 'put_threa_to_sleep'
-						// this setting is just a safety net in case no valid interval is found in the 'for' loop
-						sleep_sec = (start_sec + 86400) - current_sec;
-					}
-				}
-			}
-
-			// 00:00      start   end        23:59
-			//   |----------|xxxxxx|-----------|
-			//		                     ^
-			//                        current
-			if(current_sec > end_sec) {
-				//printf("dbg#7\n");
-				// put thread to sleep until the next day, start time; 24*60*60 = 86400 sec;
-				sleep_sec = (start_sec + 86400) - current_sec;
-				goto put_thread_to_sleep;
-			}
-
-		// 00:00       end   start        23:59
-		//   |xxxxxxxxxx|------|xxxxxxxxxxxx|
-		} else if(start_sec > end_sec) {
-			//printf("dbg#8\n");
-
-			// 00:00       end   start        23:59
-			//   |xxxxxxxxxx|------|xxxxxxxxxxxx|
-			//                           ^
-			//                        current
-			if(current_sec >= start_sec) {
-				//printf("dbg#9\n");
-				intervals = ((end_sec + 86400) - start_sec) / (task.freq * 60);
-				for(i=0; i<intervals; i++) {
-					//printf("dbg#10\n");
-					if( (current_sec >= (i    * (task.freq * 60) + start_sec)) &&
-						(current_sec < ((i+1) * (task.freq * 60) + start_sec))) {
-						if( current_sec == (i * (task.freq * 60) + start_sec) ) {
-							// execute task
-							//printf("dbg#11\n");
-							bcm2835_gpio_fsel(4, BCM2835_GPIO_FSEL_OUTP);	
-							bcm2835_gpio_fsel(18, BCM2835_GPIO_FSEL_OUTP);	
-
-							printf("gpio 4 set\n");
-							bcm2835_gpio_set(4);
-
-							printf("gpio 18 set\n");
-							bcm2835_gpio_set(18);
-
-							sleep(task.duration);
-
-							printf("gpio 4 clr\n");
-							bcm2835_gpio_clr(4);
-
-							printf("gpio 18 clr\n");
-							bcm2835_gpio_clr(18);
-
-							sleep_sec = task.freq * 60 - task.duration;
-							goto put_thread_to_sleep;
-						} else {
-							//printf("dbg#12\n");
-							sleep_sec = ((i+1) * (task.freq * 60) + start_sec) - current_sec;
-							goto put_thread_to_sleep;
-						}
-					}
-				}
-			}
-
-			if(current_sec <= end_sec) {
-				//printf("dbg#13\n");
-				intervals = (end_sec - (start_sec - 86400)) / (task.freq * 60);
-				for(i=0; i<intervals; i++) {
-					//printf("dbg#14\n");
-					if( (current_sec >= (i    * (task.freq * 60) + (start_sec - 86400))) &&
-						(current_sec < ((i+1) * (task.freq * 60) + (start_sec - 86400)))) {
-						if( current_sec == (i * (task.freq * 60) + (start_sec - 86400)) ) {
-							// execute task
-							//printf("dbg#15\n");
-							bcm2835_gpio_fsel(4, BCM2835_GPIO_FSEL_OUTP);	
-							bcm2835_gpio_fsel(18, BCM2835_GPIO_FSEL_OUTP);	
-
-							printf("gpio 4 set\n");
-							bcm2835_gpio_set(4);
-
-							printf("gpio 18 set\n");
-							bcm2835_gpio_set(18);
-
-							sleep(task.duration);
-
-							printf("gpio 4 clr\n");
-							bcm2835_gpio_clr(4);
-
-							printf("gpio 18 clr\n");
-							bcm2835_gpio_clr(18);
-
-							sleep_sec = task.freq * 60 - task.duration;
-							goto put_thread_to_sleep;
-						} else {
-							//printf("dbg#16\n");
-							sleep_sec = ((i+1) * (task.freq * 60) + (start_sec - 86400)) - current_sec;
-							goto put_thread_to_sleep;
-						}
-					}
-				}
-			}
-
-			if((current_sec > end_sec) && (current_sec < start_sec)) {
-				//printf("dbg#17\n");
-				// put thread to sleep until start time
-				sleep_sec = start_sec - current_sec;
-				goto put_thread_to_sleep;
-			}
-
-		// 00:00    start/end             23:59
-		//   |xxxxxxxxxxx|xxxxxxxxxxxxxxxxxx|
-		} else if (start_sec == end_sec) {
-			//printf("dbg#x\n");
+		// calculate time segments as per the above diagram
+		if(start_sec < end_sec){
+			// time segment_0
+			time_segments[0].segment_start = end_sec - 86400;
+			time_segments[0].segment_end   = start_sec;
+			time_segments[0].active        = 0;
+			// time segment_1
+			time_segments[1].segment_start = start_sec;
+			time_segments[1].segment_end   = end_sec;
+			time_segments[1].active        = 1;
+			// time segment_2
+			time_segments[2].segment_start = end_sec;
+			time_segments[2].segment_end   = start_sec + 86400;
+			time_segments[2].active        = 0;
+		} else if(start_sec > end_sec){
+			// time segment_0
+			time_segments[0].segment_start = start_sec - 86400;
+			time_segments[0].segment_end   = end_sec;
+			time_segments[0].active        = 1;
+			// time segment_1
+			time_segments[1].segment_start = end_sec;
+			time_segments[1].segment_end   = start_sec;
+			time_segments[1].active        = 0;
+			// time segment_2
+			time_segments[2].segment_start = start_sec;
+			time_segments[2].segment_end   = end_sec + 86400;
+			time_segments[2].active        = 1;
+		} else {
+			// active period is around the clock
 		}
 
-	put_thread_to_sleep:
-			print_safe(task.id, &logfile_mutex, "task #,%d, going to sleep for ,%d, sec (,%d, min)\n", 3, task.id, sleep_sec, sleep_sec/60);
-			// put thread to sleep until the next scheduled wake-up
-			sleep(sleep_sec);
-			print_safe(task.id, &logfile_mutex, "task #,%d, woke up\n", 1, task.id);
+		// set the default sleep time for the current thread
+		sleep_sec = 60;
+
+		// iterate through all the time segments and determine in which one the current time fits in
+		for(s=0; s<3; s++){
+			// active segment
+			if( (current_sec >= time_segments[s].segment_start) &&
+				(current_sec <= time_segments[s].segment_end)   &&
+				(time_segments[s].active == 1)) {
+				// calculate the wake-up intervals across the active segment
+				intervals = (unsigned int)(time_segments[s].segment_end -
+						                   time_segments[s].segment_start) /
+						                   (task.freq * 60);
+				// determine in which of these intervals the current time is
+				for(i=0; i<intervals; i++){
+					interval_start = ( i    * task.freq * 60) + time_segments[s].segment_start;
+					interval_end   = ((i+1) * task.freq * 60) + time_segments[s].segment_start;
+					// found a valid interval inside the active time segment
+					if(current_sec >= interval_start &&
+					   current_sec <  interval_end) {
+						// determine now if the current time perfectly matches the start of the interval
+						// or if the thread need to be put to sleep until the start of the next interval
+						if(current_sec == interval_start) {
+							// execute task
+							execute_task(&task);
+							sleep_sec = interval_end - task.duration;
+						} else {
+							// put thread to sleep until next interval start
+							sleep_sec = interval_end - current_sec;
+						}
+						// break the for loop;
+						break;
+					}
+				}
+			// inactive segment
+			} else if ( (current_sec > time_segments[s].segment_start) &&
+					    (current_sec < time_segments[s].segment_end)   &&
+					    (time_segments[s].active == 0) ) {
+
+				switch(s){
+				case 0: sleep_sec = time_segments[1].segment_start - current_sec; break;
+				case 1: sleep_sec = time_segments[2].segment_start - current_sec; break;
+				case 2: sleep_sec = (time_segments[1].segment_start + 86400) - current_sec; break;
+				default: // we're in trouble if program flow choses this case
+					break;
+				}
+			}
+		}
+		// put thread to sleep until the next scheduled wake-up
+		print_safe(task.id, &logfile_mutex, "task #,%d, going to sleep for ,%d, sec (,%d, min)\n", 3, task.id, sleep_sec, sleep_sec/60);
+		sleep(sleep_sec);
+		print_safe(task.id, &logfile_mutex, "task #,%d, woke up\n", 1, task.id);
 	 }
 }
 
