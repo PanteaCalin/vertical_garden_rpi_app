@@ -7,20 +7,20 @@
 #include "vertical_garden_rpi_app.h"
 
 /******************************************
- * 				Defines
+ *                Defines
  *******************************************/
 #define PERIODIC_TASKS_NO   6
-#define TASK_ID_POS			0
-#define TASK_ACTIVE_POS  	1
+#define TASK_ID_POS	    0
+#define TASK_ACTIVE_POS     1
 #define TASK_START_TIME_POS 2
-#define TASK_END_TIME_POS	3
-#define TASK_FREQ_POS		4
-#define TASK_DURATION_POS	5
+#define TASK_END_TIME_POS   3
+#define TASK_FREQ_POS	    4
+#define TASK_DURATION_POS   5
 
 #define LOG_FILE "log_file.csv"
 
 /******************************************
- * 				Global Variables
+ *             Global Variables
  *******************************************/
 struct periodic_task {
 	unsigned int id;
@@ -38,7 +38,6 @@ pthread_mutex_t logfile_mutex;
 
 const unsigned int task_gpios[6] = {4, 0, 0, 0, 0, 0};
 
-
 const struct time_segment {
 	time_t        segment_start;
 	time_t        segment_end;
@@ -46,7 +45,7 @@ const struct time_segment {
 };
 
 /******************************************
- * 		   Function Prototypes
+ *            Function Prototypes
  *******************************************/
 static void print_safe(unsigned int task_id, pthread_mutex_t* mutex, char* msg, int argn, ...);
 
@@ -115,10 +114,7 @@ static void update_periodic_tasks_from_database(void)
 
 	mysql_free_result(res);
 	mysql_close(conn);
-
-	printf("MySQL Database connection done\n");
 	print_safe(0, &logfile_mutex, "MySQL Database connection done\n", 0);
-	// return 0; // void
 }
 
 /******************************************
@@ -138,29 +134,30 @@ static void print_safe(unsigned int task_id, pthread_mutex_t* mutex, char* msg, 
 
 	// begin of mutex-protected area
 	pthread_mutex_lock(mutex);
-
 	// open log file
 	fp = fopen(LOG_FILE, "a+");
 	if(fp == NULL) {
 		printf("ERROR: task #%d: could not open log file\n", task_id);
 		exit(1);
 	}
-
-	timestamp_sec = time(NULL);
-	timestamp = localtime(&timestamp_sec);
+	// get current timestamp
+	timestamp_sec = time(NULL);            // seconds since epoch
+	timestamp = localtime(&timestamp_sec); // nicely broken down time
+	
 	va_list args;
 	va_start(args, argn);
 	// print timestamp
 	fprintf(fp, "%u,-,%d:%d:%d:%d:%d:%d:, ", timestamp_sec,
-											 timestamp->tm_year + 1900,
-											 timestamp->tm_mon + 1,
-											 timestamp->tm_mday,
-											 timestamp->tm_hour,
-											 timestamp->tm_min,
-											 timestamp->tm_sec);
+					         timestamp->tm_year + 1900,
+						 timestamp->tm_mon + 1,
+						 timestamp->tm_mday,
+						 timestamp->tm_hour,
+						 timestamp->tm_min,
+						 timestamp->tm_sec);
+	// print the actual message together with the variable number of arguments
 	vfprintf(fp, msg, args);
 	va_end(args);
-
+	
 	// close log file
 	fclose(fp);
 	// end of mutex-protected area
@@ -182,20 +179,12 @@ static void *run_periodic_task(void *arg)
 {
 	struct periodic_task task = *(struct periodic_task *)arg;
 
-	time_t current_time_sec;
-	time_t midnight_time_sec;
-	time_t task_start_time_sec;
-	time_t task_end_time_sec;
-	time_t task_next_wake_up_sec;
-
+	time_t current_sec;
 	time_t start_sec;
 	time_t end_sec;
-	time_t current_sec;
-
 	time_t interval_start;
 	time_t interval_end;
-
-	time_t sleep_sec = 0;
+	time_t sleep_sec = 60;
 
 	struct tm *time_broken_down;
 
@@ -208,40 +197,21 @@ static void *run_periodic_task(void *arg)
 	while(1) {
 
 		// get current time in seconds since epoch (01.01.1970, 00:00:00)
-		current_time_sec = time(NULL);
-		printf("current_time_sec: %d\n", current_time_sec);
+		current_sec = time(NULL);
 		// get current time broken down
-		time_broken_down = localtime(&current_time_sec);
-		printf("localtime: %d:%d:%d:%d:%d:%d\n", time_broken_down->tm_year + 1900,
-												 time_broken_down->tm_mon + 1,
-												 time_broken_down->tm_mday,
-												 time_broken_down->tm_hour,
-												 time_broken_down->tm_min,
-												 time_broken_down->tm_sec);
-		// get midnight time in sec
-		time_broken_down->tm_hour = 0;
-		time_broken_down->tm_min = 0;
-		midnight_time_sec = mktime(time_broken_down);
+		time_broken_down = localtime(&current_sec);
 
 		// get task start time in sec
-		time_broken_down->tm_hour = task.start_hour;
-		time_broken_down->tm_min = task.start_min;
-		time_broken_down->tm_sec = 0; //NOTE: start and end time do not supprt seconds resolution
-		task_start_time_sec = mktime(time_broken_down);
+		time_broken_down->tm_hour = task.start_hour; // overwrite current time's hour with the start hour 
+		time_broken_down->tm_min = task.start_min;   // overwrite current time's minute with the start minute
+		time_broken_down->tm_sec = 0;                // NOTE: start and end time do not supprt seconds resolution
+		start_sec = mktime(time_broken_down);        // transform in seconds since epoch
 
 		// set task end time in sec
-		time_broken_down->tm_hour = task.end_hour;
-		time_broken_down->tm_min = task.end_min;
-		time_broken_down->tm_sec = 0; //NOTE:
-		task_end_time_sec = mktime(time_broken_down);
-
-		current_sec = current_time_sec;
-		start_sec   = task_start_time_sec;
-		end_sec     = task_end_time_sec;
-
-		printf("current_sec: %d\n", current_sec);
-		printf("start_sec:   %d\n", start_sec);
-		printf("end_sec:     %d\n", end_sec);
+		time_broken_down->tm_hour = task.end_hour; // overwrite current time's hour with the end hour
+		time_broken_down->tm_min = task.end_min;   // overwrite current time's minute with the end minute
+		time_broken_down->tm_sec = 0;              // NOTE: start and end time do not supprt seconds resolution
+		end_sec = mktime(time_broken_down);        // transform in seconds since epoch
 
 		// Algorithm rationale:
 		//                         00:00:00                   23:59:59
@@ -322,6 +292,7 @@ static void *run_periodic_task(void *arg)
 						if(current_sec == interval_start) {
 							// execute task
 							execute_task(&task);
+							// put thread to sleep until: (next interval start) - (the duration of the task)
 							sleep_sec = interval_end - task.duration;
 						} else {
 							// put thread to sleep until next interval start
@@ -364,8 +335,8 @@ int main() {
 	pthread_mutex_init(&logfile_mutex, NULL);
 
 	print_safe(0, &logfile_mutex, "Application started\n", 0);
-
-	printf("bcm2835_init result: %d\n", bcm2835_init());
+	// initialize bcm2835 library
+	print_safe(0, &logfile_mutex, "bcm2835_init result: %d\n", 1, bcm2835_init());
 
 	// update periodic tasks parameters from database
 	update_periodic_tasks_from_database();
