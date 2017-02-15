@@ -245,7 +245,7 @@ static void *run_periodic_task(void *arg)
 
 		// Algorithm rationale:
 		//                         00:00:00                   23:59:59
-		// ||-------- DAY n-1 --------||---------- DAY n --------||-------- DAY n+1 --------|| }
+		// ||<------- DAY n-1 ------->||<--------- DAY n ------->||<------- DAY n+1 ------->|| }
 		// ||                         ||                         ||                         || }
 		// ||    start      end       ||    start      end       ||     start     end       || } case 1: start < end
                 // ||______|_________|________||______|_________|________||______|_________|________|| }
@@ -264,6 +264,7 @@ static void *run_periodic_task(void *arg)
                 //                                                 SEGMENT_2
 
 		// calculate time segments as per the above diagram
+		// case 1
 		if(start_sec < end_sec){
 			// time segment_0
 			time_segments[0].segment_start = end_sec - 86400;
@@ -277,6 +278,7 @@ static void *run_periodic_task(void *arg)
 			time_segments[2].segment_start = end_sec;
 			time_segments[2].segment_end   = start_sec + 86400;
 			time_segments[2].active        = 0;
+		// case 2
 		} else if(start_sec > end_sec){
 			// time segment_0
 			time_segments[0].segment_start = start_sec - 86400;
@@ -290,6 +292,7 @@ static void *run_periodic_task(void *arg)
 			time_segments[2].segment_start = start_sec;
 			time_segments[2].segment_end   = end_sec + 86400;
 			time_segments[2].active        = 1;
+		// case 3
 		} else {
 			// active period is around the clock
 		}
